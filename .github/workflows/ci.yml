@@ -17,3 +17,29 @@ jobs:
       - run: pytest -v
       - name: Regenerate test vectors
         run: python -m model.generate_vectors --out /tmp/vectors
+
+  rtl-verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # cocotb 2.x needs Verilator >= 5.036; distro ships 5.020, so pin 1.9.2
+      # (docs/PHASE3_VERIFICATION.md section 5).
+      - run: sudo apt-get update && sudo apt-get install -y verilator
+      - run: pip install numpy "cocotb==1.9.2"
+      - name: Lint RTL
+        run: make -C sim lint
+      - name: SystemVerilog testbenches
+        run: make -C sim
+      - name: SystemVerilog testbenches under stall + quant
+        run: |
+          make -C sim top STALL=30
+          make -C sim top STALL=30 QUANT=1
+      - name: cocotb constrained-random regression
+        # Fixed seed keeps CI deterministic; run locally with a random seed
+        # (python tb/cocotb/run.py) to explore new stimulus.
+        run: python tb/cocotb/run.py --seed 1
+      - name: Coverage report
+        run: cat sim/build/coverage_report.txt

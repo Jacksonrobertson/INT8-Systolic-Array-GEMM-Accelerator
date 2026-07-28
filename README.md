@@ -5,15 +5,15 @@ INT8 inference: `N×N` array of INT8 MACs with INT32 accumulators, AXI-Stream
 I/O, double-buffered weight memory, and a small control FSM. Verified at 4×4,
 synthesized at 8×8 (OpenLane/Sky130).
 
-**Status: Phase 2 complete** — parameterized SystemVerilog RTL, verified at
-4×4 and 8×8 against the golden model's vectors (values, cycle-level ordering,
-AXI-Stream backpressure, and the optional INT8 output stage).
+**Status: Phase 3 complete** — cocotb constrained-random verification with
+enforced functional-coverage closure, on top of the Phase 2 SVA set and
+vector regression. Bench qualified by mutation testing.
 
 | Phase | Deliverable | Status |
 |---|---|---|
 | 1 | [Microarchitecture spec](docs/SPEC.md) + Python golden model | ✅ done |
 | 2 | Parameterized SystemVerilog RTL (PE → array → buffers/FSM → AXI-Stream) | ✅ done |
-| 3 | cocotb constrained-random verification + SVA + functional coverage | 🔨 SVA + vector regression done |
+| 3 | cocotb constrained-random verification + SVA + functional coverage | ✅ done |
 | 4 | OpenLane/Sky130 synthesis + P&R, PPA sweep and writeup | ⬜ |
 | 5 | Packaging, reproducible builds, (optional) FPGA demo | ⬜ |
 
@@ -36,6 +36,8 @@ AXI-Stream backpressure, and the optional INT8 output stage).
 Full details: **[docs/SPEC.md](docs/SPEC.md)**.
 Phase 2 implementation report, including a correction to the spec's zero-bubble
 bound: **[docs/PHASE2_RTL.md](docs/PHASE2_RTL.md)**.
+Phase 3 verification report, including the coverage model and mutation
+checks: **[docs/PHASE3_VERIFICATION.md](docs/PHASE3_VERIFICATION.md)**.
 
 ## Golden model
 
@@ -68,6 +70,7 @@ tests/                pytest self-checks for the golden model
 vectors/              generated .memh test vectors (checked in for CI diffing)
 rtl/                  SystemVerilog RTL
 tb/                   SystemVerilog testbenches
+tb/cocotb/            constrained-random cocotb bench + functional coverage
 sim/                  Verilator build (make / make lint / make top STALL=30)
 ```
 
@@ -85,6 +88,23 @@ make top QUANT=1           # end-to-end through the INT8 output stage
 
 Assertions (accumulator overflow, AXI-Stream stability, FSM legality) are
 compiled in via `+define+SIM_ASSERT`.
+
+## Constrained-random verification (cocotb)
+
+Requires Verilator 5.x and `cocotb==1.9.2` (cocotb 2.x needs Verilator ≥
+5.036, newer than distro packages ship).
+
+```bash
+python tb/cocotb/run.py              # full session: N=4 + N=8, random seed
+python tb/cocotb/run.py --seed 42    # reproduce a session exactly
+```
+
+Each run randomizes dimensions, matrices, stall/backpressure profiles,
+quantization constants and restart gaps, checks every beat against the golden
+model computed on the fly, and samples functional coverage. The session
+**fails if any mandatory coverage bin is unhit** — bins map one-to-one to
+this design's known failure modes (see
+[docs/PHASE3_VERIFICATION.md](docs/PHASE3_VERIFICATION.md)).
 
 ### Performance
 
