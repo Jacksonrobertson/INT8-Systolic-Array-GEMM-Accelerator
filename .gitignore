@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+
+# simulation/build outputs (later phases)
+*.vcd
+*.fst
+sim_build/
+results.xml
+runs/
