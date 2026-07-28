@@ -1,0 +1,37 @@
+{
+  "//": "OpenLane 2 starting config for gemm_top on sky130A (Phase 4).",
+  "//1": "Untested template: values below are documented starting points, not",
+  "//2": "results. Sweep CLOCK_PERIOD and the GEMM_N/GEMM_M_MAX pair with",
+  "//3": "flow/scripts/sweep.py; see docs/PHASE4_PLAN.md for the sweep grid.",
+
+  "DESIGN_NAME": "gemm_top",
+  "//srcs": "yosys cannot parse this project's SystemVerilog (multidim packed",
+  "//srcs2": "array ports); consume the sv2v conversion instead. Regenerate",
+  "//srcs3": "with `make -C flow sv2v` after any rtl/ change.",
+  "VERILOG_FILES": ["dir::gemm_top.sv2v.v"],
+
+  "//4": "Tape-out configuration: 8x8 array with M_MAX cut from 256 to 32 so",
+  "//5": "the accumulation RAM stays flop-based and P&R-able without an SRAM",
+  "//6": "macro (PHASE4_PLAN section 2). Functionality at M_MAX=32 is still",
+  "//7": "covered by the cocotb bench via RANDOM parameterization.",
+  "SYNTH_PARAMETERS": ["N=8", "M_MAX=32"],
+
+  "CLOCK_PORT": "clk",
+  "CLOCK_PERIOD": 20.0,
+  "PNR_SDC_FILE": "dir::constraints.sdc",
+  "SIGNOFF_SDC_FILE": "dir::constraints.sdc",
+
+  "FP_CORE_UTIL": 40,
+  "PL_TARGET_DENSITY_PCT": 45,
+
+  "//8": "Keep hierarchy through synthesis reporting so the area breakdown",
+  "//9": "(PE array vs buffers vs accum RAM vs requant) falls out of the log.",
+  "SYNTH_NO_FLAT": true,
+
+  "//10": "core_en fans out to every PE; let synthesis map enables to clock",
+  "//11": "gates instead of recirculating muxes (also a headline power win).",
+  "SYNTH_CLOCK_GATING": true,
+
+  "MAX_FANOUT_CONSTRAINT": 16,
+  "RUN_HEURISTIC_DIODE_INSERTION": true
+}

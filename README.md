@@ -14,7 +14,7 @@ vector regression. Bench qualified by mutation testing.
 | 1 | [Microarchitecture spec](docs/SPEC.md) + Python golden model | ✅ done |
 | 2 | Parameterized SystemVerilog RTL (PE → array → buffers/FSM → AXI-Stream) | ✅ done |
 | 3 | cocotb constrained-random verification + SVA + functional coverage | ✅ done |
-| 4 | OpenLane/Sky130 synthesis + P&R, PPA sweep and writeup | ⬜ |
+| 4 | OpenLane/Sky130 synthesis + P&R, PPA sweep and writeup | 🔨 [plan + flow prep](docs/PHASE4_PLAN.md) |
 | 5 | Packaging, reproducible builds, (optional) FPGA demo | ⬜ |
 
 ## Architecture at a glance
@@ -74,6 +74,7 @@ tb/                   SystemVerilog testbenches
 tb/cocotb/            constrained-random cocotb bench + functional coverage
 sim/                  Verilator build (make / make lint / make top STALL=30)
 sim/wave.sh           run one small GEMM and open it in GTKWave
+flow/                 Phase 4 OpenLane/Sky130 prep (sv2v step, config, sweep)
 ```
 
 ## Running the RTL tests
