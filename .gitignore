@@ -4,9 +4,10 @@ __pycache__/
 *.egg-info/
 .venv/
 
-# simulation/build outputs (later phases)
+# simulation/build outputs
 *.vcd
 *.fst
 sim_build/
+sim/build/
 results.xml
 runs/

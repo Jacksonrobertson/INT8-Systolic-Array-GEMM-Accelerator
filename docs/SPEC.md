@@ -130,6 +130,24 @@ results:              |                    | rows emerge | last col
 - Weight preload of the next tile happens during compute (double buffer, §5.2),
   so back-to-back tiles lose zero cycles when `M ≥ n`.
 
+> **Correction (Phase 2 RTL).** The `M ≥ n` bound above is the condition for the
+> weight tile to *arrive* in time. It is not sufficient for the commit. With one
+> shadow register per PE, a weight shift cycle moves every row's shadow down, so
+> `PE[i][j]`'s shadow is destroyed on the *first* shift cycle of column `j` —
+> not when its own row arrives. The commit ripples diagonally to `PE[i][j]` at
+> cycle `L+i+j`, so the next load cannot start until `L+n`. Combined with the
+> settle deadline `s0 ≤ L−n`, back-to-back tiles are free only when **`M ≥ 2n`**.
+>
+> Two consequences, both implemented in `rtl/`:
+> 1. The weight load is *skewed by column* (delay `j` on column `j`), putting it
+>    on the same diagonal as the commit. Without this the bound is `M ≥ 3n−1`.
+> 2. For `M < 2n` the controller withholds the tile's last activation row until
+>    the shadow is ready, inserting a bubble in the activation stream while the
+>    array keeps clocking. Measured overhead is constant in the tile count for
+>    `M ≥ 2n` and grows only for `M < 2n`.
+>
+> See the timing budget comment at the top of `rtl/gemm_ctrl.sv`.
+
 ---
 
 ## 5. Memories

@@ -1,0 +1,22 @@
+// Lint waivers scoped to tb/ only, so rtl/ stays under full -Wall.
+//
+// WIDTHEXPAND: testbench check tasks take 32-bit arguments and are called with
+//              narrower DUT signals. Zero/sign extension there is intended.
+// BLKSEQ:      `always #(TCK/2) clk = ~clk;` is the standard clock generator.
+//
+// INITIALDLY IS DELIBERATELY NOT WAIVED. Verilator executes `<=` inside an
+// initial block AS A BLOCKING ASSIGNMENT, which silently reintroduces the
+// stale-combinational-read problem described at the top of skew_buffer_tb.sv.
+// Keeping it a hard error is what forces stimulus into always_ff drivers.
+`verilator_config
+
+lint_off -rule WIDTHEXPAND -file "*/tb/*"
+lint_off -rule BLKSEQ      -file "*/tb/*"
+// SYNCASYNCNET: testbench rst_n legitimately gates a monitor synchronously
+//               while also asynchronously resetting the stimulus driver.
+lint_off -rule SYNCASYNCNET -file "*/tb/*"
+
+// SYNCASYNCNET in rtl/: `disable iff (!rst_n)` is the standard SVA idiom and
+// reads as a synchronous use of an otherwise asynchronous reset. The reset is
+// async everywhere it drives real logic; only the assertions look synchronous.
+lint_off -rule SYNCASYNCNET -file "*/rtl/*"

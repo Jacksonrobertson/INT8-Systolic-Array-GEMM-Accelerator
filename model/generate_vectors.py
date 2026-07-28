@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from model.golden_model import gemm_int8, random_matrices
+from model.golden_model import gemm_int8, random_matrices, requantize
 
 # (name, M, K, N, n, seed) — dims must be non-zero multiples of n.
 DEFAULT_CASES = [
@@ -28,6 +28,11 @@ DEFAULT_CASES = [
     ("multi_tile_4x4", 8, 12, 8, 4, 3),
     ("smoke_8x8", 8, 8, 8, 8, 4),
     ("large_8x8", 64, 32, 16, 8, 5),
+    # M < 2n with several tiles: the weight loader cannot fit a shift between
+    # one tile's commit ripple and the next tile's commit, so the controller
+    # must insert activation-stream bubbles. See gemm_ctrl.sv timing budget.
+    ("tight_4x4", 4, 8, 8, 4, 6),
+    ("tight_8x8", 8, 16, 16, 8, 7),
 ]
 
 
@@ -70,6 +75,21 @@ def emit_case(out_dir: Path, name: str, m: int, k: int, nn: int, n: int, seed: i
         block = c[:, nt * n:(nt + 1) * n]
         for r in range(m):
             c_lines.append(_pack_hex(block[r, :], 32))
+
+    # Quantized expected output (SPEC section 7), for the optional INT8 output
+    # stage. mult/shift are chosen per case so the largest |C| lands near the
+    # top of the INT8 range, rather than saturating everything to 127.
+    qshift = 31
+    cmax = int(np.abs(c).max())
+    qmult = min((1 << 24) - 1, max(1, (127 * (1 << qshift)) // max(cmax, 1)))
+    cq = requantize(c, qmult, qshift)
+    cq_lines = []
+    for nt in range(nn // n):
+        block = cq[:, nt * n:(nt + 1) * n]
+        for r in range(m):
+            cq_lines.append(_pack_hex(block[r, :], 8))
+    (case_dir / "cq.memh").write_text("\n".join(cq_lines) + "\n")
+    (case_dir / "qparams.txt").write_text(f"mult={qmult} shift={qshift}\n")
 
     (case_dir / "w.memh").write_text("\n".join(w_lines) + "\n")
     (case_dir / "a.memh").write_text("\n".join(a_lines) + "\n")

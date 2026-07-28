@@ -5,14 +5,15 @@ INT8 inference: `N×N` array of INT8 MACs with INT32 accumulators, AXI-Stream
 I/O, double-buffered weight memory, and a small control FSM. Verified at 4×4,
 synthesized at 8×8 (OpenLane/Sky130).
 
-**Status: Phase 1 complete** — microarchitecture spec + bit-exact golden
-model. RTL in progress.
+**Status: Phase 2 complete** — parameterized SystemVerilog RTL, verified at
+4×4 and 8×8 against the golden model's vectors (values, cycle-level ordering,
+AXI-Stream backpressure, and the optional INT8 output stage).
 
 | Phase | Deliverable | Status |
 |---|---|---|
 | 1 | [Microarchitecture spec](docs/SPEC.md) + Python golden model | ✅ done |
-| 2 | Parameterized SystemVerilog RTL (PE → array → buffers/FSM → AXI-Stream) | 🔨 in progress |
-| 3 | cocotb constrained-random verification + SVA + functional coverage | ⬜ |
+| 2 | Parameterized SystemVerilog RTL (PE → array → buffers/FSM → AXI-Stream) | ✅ done |
+| 3 | cocotb constrained-random verification + SVA + functional coverage | 🔨 SVA + vector regression done |
 | 4 | OpenLane/Sky130 synthesis + P&R, PPA sweep and writeup | ⬜ |
 | 5 | Packaging, reproducible builds, (optional) FPGA demo | ⬜ |
 
@@ -33,6 +34,8 @@ model. RTL in progress.
   already implemented in the golden model).
 
 Full details: **[docs/SPEC.md](docs/SPEC.md)**.
+Phase 2 implementation report, including a correction to the spec's zero-bubble
+bound: **[docs/PHASE2_RTL.md](docs/PHASE2_RTL.md)**.
 
 ## Golden model
 
@@ -63,6 +66,29 @@ docs/SPEC.md          microarchitecture specification
 model/                NumPy golden model + test-vector generation
 tests/                pytest self-checks for the golden model
 vectors/              generated .memh test vectors (checked in for CI diffing)
-rtl/                  SystemVerilog (Phase 2)
-tb/                   cocotb testbench (Phase 3)
+rtl/                  SystemVerilog RTL
+tb/                   SystemVerilog testbenches
+sim/                  Verilator build (make / make lint / make top STALL=30)
 ```
+
+## Running the RTL tests
+
+Requires Verilator 5.x.
+
+```bash
+cd sim
+make                       # lint-clean build + every testbench
+make lint                  # RTL lint only (-Wall)
+make top STALL=30          # end-to-end with 30% random stream stalls
+make top QUANT=1           # end-to-end through the INT8 output stage
+```
+
+Assertions (accumulator overflow, AXI-Stream stability, FSM legality) are
+compiled in via `+define+SIM_ASSERT`.
+
+### Performance
+
+Overhead beyond the ideal one-row-per-cycle stream is **constant in the number
+of tiles** when `M ≥ 2n` — 27 cycles at 4×4, 47 at 8×8 — i.e. tile handover is
+free. `M < 2n` pays a bounded per-handover bubble; see the correction note in
+[SPEC §4.2](docs/SPEC.md#42-skewed-wavefront).
