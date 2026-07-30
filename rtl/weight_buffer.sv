@@ -21,8 +21,11 @@ module weight_buffer #(
   input  logic                     clk,
   input  logic                     rst_n,
 
+  // Lane vectors are flat (lane i at bits [i*DW_IN +: DW_IN]): mainline yosys
+  // cannot parse multidimensional packed arrays, and OpenLane runs it.
+
   // Fill side: one tile column per beat.
-  input  logic [N-1:0][DW_IN-1:0]  col_data,
+  input  logic [N*DW_IN-1:0]       col_data,
   input  logic                     col_valid,
   output logic                     col_ready,
 
@@ -32,13 +35,13 @@ module weight_buffer #(
 
   // Drain side: one tile row per cycle, combinationally read.
   input  logic [$clog2(N)-1:0]     rd_row,
-  output logic [N-1:0][DW_IN-1:0]  w_row
+  output logic [N*DW_IN-1:0]       w_row
 );
 
   localparam int CNT_W = $clog2(N + 1);
 
   // mem[bank][row] is one packed tile row; lane j is column j.
-  logic [N-1:0][DW_IN-1:0] mem [2][N];
+  logic [N*DW_IN-1:0] mem [2][N];
 
   logic             fill_bank;   // bank currently being filled
   logic [CNT_W-1:0] col_cnt;     // columns written into the fill bank
@@ -64,7 +67,9 @@ module weight_buffer #(
       // Beat col_cnt carries column col_cnt: scatter its N lanes down the
       // rows of the fill bank. This is the transpose.
       if (col_fire) begin
-        for (int i = 0; i < N; i++) mem[fill_bank][i][col_cnt[$clog2(N)-1:0]] <= col_data[i];
+        for (int i = 0; i < N; i++)
+          mem[fill_bank][i][col_cnt[$clog2(N)-1:0]*DW_IN +: DW_IN]
+            <= col_data[i*DW_IN +: DW_IN];
       end
     end
   end

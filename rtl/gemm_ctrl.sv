@@ -7,7 +7,7 @@
 //           shifts it into the array's shadow registers WHILE the current tile
 //           computes. Handshake is a single flag, shadow_ready.
 //
-// Only the first tile of a GEMM uses a broadcast commit (S_LOAD_W/S_SWAP, with
+// Only the first tile of a GEMM uses a broadcast commit (gemm_pkg::S_LOAD_W/gemm_pkg::S_SWAP, with
 // the array empty). Every later tile is committed diagonally: the main FSM
 // raises swap_row on the tile's last activation row, and that token rides the
 // skew network so each PE swaps on exactly the cycle it consumes that row.
@@ -41,9 +41,9 @@
 //
 // Control outputs are combinational decodes of state and counters. A
 // registered version is off by one at each of the weight-handoff boundaries.
-module gemm_ctrl
-  import gemm_pkg::*;
-#(
+// Package references are fully qualified (gemm_pkg::...): mainline yosys
+// parses qualified references but not wildcard package imports.
+module gemm_ctrl #(
   parameter int N     = 8,
   parameter int M_MAX = 256
 ) (
@@ -53,9 +53,9 @@ module gemm_ctrl
 
   // Configuration, sampled at start (SPEC section 6.2).
   input  logic               start,
-  input  logic [DIM_W-1:0]   cfg_m,
-  input  logic [DIM_W-1:0]   cfg_k,
-  input  logic [DIM_W-1:0]   cfg_n,
+  input  logic [gemm_pkg::DIM_W-1:0]   cfg_m,
+  input  logic [gemm_pkg::DIM_W-1:0]   cfg_k,
+  input  logic [gemm_pkg::DIM_W-1:0]   cfg_n,
   output logic               busy,
   output logic               done,
 
@@ -73,9 +73,9 @@ module gemm_ctrl
   output logic [1:0]         a_tag,       // {first kt, last kt}
 
   // Sampled dimensions, for the datapath.
-  output logic [DIM_W-1:0]   dim_m,
-  output logic [DIM_W-1:0]   dim_n,
-  output state_e             state
+  output logic [gemm_pkg::DIM_W-1:0]   dim_m,
+  output logic [gemm_pkg::DIM_W-1:0]   dim_n,
+  output gemm_pkg::state_e             state
 );
 
   localparam int LOG2N     = $clog2(N);
@@ -93,11 +93,11 @@ module gemm_ctrl
     WL_SETTLE = 3'b100
   } wl_state_e;
 
-  logic [DIM_W-1:0]   m_q, k_q, n_q;
-  logic [DIM_W-1:0]   kt, nt;          // tile being computed
-  logic [DIM_W-1:0]   l_kt, l_nt;      // tile being loaded
+  logic [gemm_pkg::DIM_W-1:0]   m_q, k_q, n_q;
+  logic [gemm_pkg::DIM_W-1:0]   kt, nt;          // tile being computed
+  logic [gemm_pkg::DIM_W-1:0]   l_kt, l_nt;      // tile being loaded
   logic               l_done;          // every tile has been loaded
-  logic [DIM_W-1:0]   row_cnt;
+  logic [gemm_pkg::DIM_W-1:0]   row_cnt;
   logic [DRAIN_W-1:0] drain_cnt;
   wl_state_e          wl_state;
   logic [SET_W-1:0]   wl_cnt;
@@ -109,8 +109,8 @@ module gemm_ctrl
   // WL_IDLE asserting bank_swap before the first shift cycle.
   logic [HOLD_W-1:0]  hold_cnt;
 
-  wire [DIM_W-1:0] kt_max = (k_q >> LOG2N) - 1'b1;
-  wire [DIM_W-1:0] nt_max = (n_q >> LOG2N) - 1'b1;
+  wire [gemm_pkg::DIM_W-1:0] kt_max = (k_q >> LOG2N) - 1'b1;
+  wire [gemm_pkg::DIM_W-1:0] nt_max = (n_q >> LOG2N) - 1'b1;
 
   assign dim_m = m_q;
   assign dim_n = n_q;
@@ -128,16 +128,16 @@ module gemm_ctrl
   // Rows are pushed deepest-first: the first row shifted in travels furthest.
   assign wb_rd_row    = LOG2N'(N-1) - wl_cnt[LOG2N-1:0];
 
-  assign swap_bcast   = (state == S_SWAP);
+  assign swap_bcast   = (state == gemm_pkg::S_SWAP);
   // Withhold the last row until the next tile's weights are in the shadows.
-  assign a_stream     = (state == S_COMPUTE) && !(need_swap && !shadow_ready);
+  assign a_stream     = (state == gemm_pkg::S_COMPUTE) && !(need_swap && !shadow_ready);
   assign swap_row     = a_fire && need_swap;
   assign a_tag        = {kt == '0, kt == kt_max};
 
   // ---- sequencing --------------------------------------------------------
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      state          <= S_IDLE;
+      state          <= gemm_pkg::S_IDLE;
       busy           <= 1'b0;
       done           <= 1'b0;
       m_q            <= '0;
@@ -206,7 +206,7 @@ module gemm_ctrl
 
       // ---- main schedule ----
       case (state)
-        S_IDLE: if (start) begin
+        gemm_pkg::S_IDLE: if (start) begin
           m_q            <= cfg_m;
           k_q            <= cfg_k;
           n_q            <= cfg_n;
@@ -223,25 +223,25 @@ module gemm_ctrl
           hold_cnt       <= '0;
           busy           <= 1'b1;
           done           <= 1'b0;
-          state          <= S_LOAD_W;
+          state          <= gemm_pkg::S_LOAD_W;
         end
 
         // First tile only: the array is empty, so it is committed by broadcast
         // and must wait for every column of the skewed load to settle.
-        S_LOAD_W: if (shadow_settled) state <= S_SWAP;
+        gemm_pkg::S_LOAD_W: if (shadow_settled) state <= gemm_pkg::S_SWAP;
 
-        S_SWAP: begin
+        gemm_pkg::S_SWAP: begin
           shadow_ready   <= 1'b0;   // frees the loader to fetch the next tile
           shadow_settled <= 1'b0;
           row_cnt        <= '0;
-          state          <= S_COMPUTE;
+          state          <= gemm_pkg::S_COMPUTE;
         end
 
-        S_COMPUTE: if (a_fire) begin
+        gemm_pkg::S_COMPUTE: if (a_fire) begin
           if (last_row) begin
             if (last_tile) begin
               drain_cnt <= '0;
-              state     <= S_DRAIN;
+              state     <= gemm_pkg::S_DRAIN;
             end else begin
               // Diagonal commit went out with this row; advance to the next
               // tile with no gap and release the loader.
@@ -262,18 +262,18 @@ module gemm_ctrl
           end
         end
 
-        S_DRAIN: begin
-          if (drain_cnt == DRAIN_W'(DRAIN_CYC - 1)) state <= S_DONE;
+        gemm_pkg::S_DRAIN: begin
+          if (drain_cnt == DRAIN_W'(DRAIN_CYC - 1)) state <= gemm_pkg::S_DONE;
           else drain_cnt <= drain_cnt + 1'b1;
         end
 
-        S_DONE: begin
+        gemm_pkg::S_DONE: begin
           busy  <= 1'b0;
           done  <= 1'b1;
-          state <= S_IDLE;
+          state <= gemm_pkg::S_IDLE;
         end
 
-        default: state <= S_IDLE;
+        default: state <= gemm_pkg::S_IDLE;
       endcase
     end
   end
@@ -281,12 +281,12 @@ module gemm_ctrl
 `ifdef SIM_ASSERT
   // SPEC section 5.3: the accumulation RAM is sized for M rows per pass.
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_IDLE && start) |-> (cfg_m <= DIM_W'(M_MAX)))
+                   (state == gemm_pkg::S_IDLE && start) |-> (cfg_m <= gemm_pkg::DIM_W'(M_MAX)))
     else $error("gemm_ctrl: M=%0d exceeds M_MAX=%0d", cfg_m, M_MAX);
 
   // SPEC section 1.2: dimensions must be non-zero multiples of the array size.
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_IDLE && start) |->
+                   (state == gemm_pkg::S_IDLE && start) |->
                    (cfg_m != 0 && cfg_k != 0 && cfg_n != 0 &&
                     cfg_k[LOG2N-1:0] == '0 && cfg_n[LOG2N-1:0] == '0))
     else $error("gemm_ctrl: illegal dimensions M=%0d K=%0d N=%0d",
@@ -308,27 +308,27 @@ module gemm_ctrl
   // Legal transitions. Each set includes the state itself, since a stall
   // (core_en low) holds every state register.
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_IDLE)    |=> (state inside {S_IDLE, S_LOAD_W}))
-    else $error("gemm_ctrl: illegal transition out of S_IDLE");
+                   (state == gemm_pkg::S_IDLE)    |=> (state inside {gemm_pkg::S_IDLE, gemm_pkg::S_LOAD_W}))
+    else $error("gemm_ctrl: illegal transition out of gemm_pkg::S_IDLE");
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_LOAD_W)  |=> (state inside {S_LOAD_W, S_SWAP}))
-    else $error("gemm_ctrl: illegal transition out of S_LOAD_W");
+                   (state == gemm_pkg::S_LOAD_W)  |=> (state inside {gemm_pkg::S_LOAD_W, gemm_pkg::S_SWAP}))
+    else $error("gemm_ctrl: illegal transition out of gemm_pkg::S_LOAD_W");
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_SWAP)    |=> (state inside {S_SWAP, S_COMPUTE}))
-    else $error("gemm_ctrl: illegal transition out of S_SWAP");
+                   (state == gemm_pkg::S_SWAP)    |=> (state inside {gemm_pkg::S_SWAP, gemm_pkg::S_COMPUTE}))
+    else $error("gemm_ctrl: illegal transition out of gemm_pkg::S_SWAP");
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_COMPUTE) |=> (state inside {S_COMPUTE, S_DRAIN}))
-    else $error("gemm_ctrl: illegal transition out of S_COMPUTE");
+                   (state == gemm_pkg::S_COMPUTE) |=> (state inside {gemm_pkg::S_COMPUTE, gemm_pkg::S_DRAIN}))
+    else $error("gemm_ctrl: illegal transition out of gemm_pkg::S_COMPUTE");
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_DRAIN)   |=> (state inside {S_DRAIN, S_DONE}))
-    else $error("gemm_ctrl: illegal transition out of S_DRAIN");
+                   (state == gemm_pkg::S_DRAIN)   |=> (state inside {gemm_pkg::S_DRAIN, gemm_pkg::S_DONE}))
+    else $error("gemm_ctrl: illegal transition out of gemm_pkg::S_DRAIN");
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_DONE)    |=> (state inside {S_DONE, S_IDLE}))
-    else $error("gemm_ctrl: illegal transition out of S_DONE");
+                   (state == gemm_pkg::S_DONE)    |=> (state inside {gemm_pkg::S_DONE, gemm_pkg::S_IDLE}))
+    else $error("gemm_ctrl: illegal transition out of gemm_pkg::S_DONE");
 
   // The row counter must never run past the configured M.
   assert property (@(posedge clk) disable iff (!rst_n)
-                   (state == S_COMPUTE) |-> (row_cnt < m_q))
+                   (state == gemm_pkg::S_COMPUTE) |-> (row_cnt < m_q))
     else $error("gemm_ctrl: row_cnt %0d exceeds M=%0d", row_cnt, m_q);
 `endif
 

@@ -19,17 +19,19 @@ module pe_array #(
   input  logic                     rst_n,
   input  logic                     en,
 
-  input  logic [N-1:0][DW_IN-1:0]  a_west,      // skewed activations, row i
+  // Lane vectors are flat (lane i at bits [i*W +: W]): mainline yosys cannot
+  // parse multidimensional packed arrays, and OpenLane runs mainline yosys.
+  input  logic [N*DW_IN-1:0]       a_west,      // skewed activations, row i
   input  logic [N-1:0]             swap_west,   // skewed swap token, row i
 
   // Weight shift chain. Per-column enable: the load is skewed to follow the
   // same diagonal as the commit (see systolic_array.sv), so column j shifts on
   // its own cycles rather than in lockstep with the rest.
-  input  logic [N-1:0][DW_IN-1:0]  w_top,       // one tile row, column j
+  input  logic [N*DW_IN-1:0]       w_top,       // one tile row, column j
   input  logic [N-1:0]             w_shift_en,
   input  logic                     swap_bcast,
 
-  output logic [N-1:0][DW_ACC-1:0] psum_south   // skewed results, column j
+  output logic [N*DW_ACC-1:0]      psum_south   // skewed results, column j
 );
 
   // [i][j] = output of PE[i][j] on each of the three flow directions.
@@ -45,14 +47,14 @@ module pe_array #(
         .rst_n      (rst_n),
         .en         (en),
         // West edge takes the skewed input; interior takes the neighbour.
-        .a_in       (j == 0 ? a_west[i]    : a_h[i][j-1]),
+        .a_in       (j == 0 ? a_west[i*DW_IN +: DW_IN] : a_h[i][j-1]),
         .a_out      (a_h[i][j]),
         .swap_in    (j == 0 ? swap_west[i] : swap_h[i][j-1]),
         .swap_out   (swap_h[i][j]),
         // Top row starts each column's accumulation at zero.
         .psum_in    (i == 0 ? '0 : psum_v[i-1][j]),
         .psum_out   (psum_v[i][j]),
-        .w_in       (i == 0 ? w_top[j] : w_v[i-1][j]),
+        .w_in       (i == 0 ? w_top[j*DW_IN +: DW_IN] : w_v[i-1][j]),
         .w_out      (w_v[i][j]),
         .w_shift_en (w_shift_en[j]),
         .swap_bcast (swap_bcast)
@@ -61,7 +63,7 @@ module pe_array #(
   end
 
   for (genvar j = 0; j < N; j++) begin : g_south
-    assign psum_south[j] = psum_v[N-1][j];
+    assign psum_south[j*DW_ACC +: DW_ACC] = psum_v[N-1][j];
   end
 
 endmodule

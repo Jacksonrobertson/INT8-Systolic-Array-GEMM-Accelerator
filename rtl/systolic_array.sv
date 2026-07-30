@@ -30,8 +30,11 @@ module systolic_array #(
   input  logic                     rst_n,
   input  logic                     en,
 
+  // Lane vectors are flat (lane i at bits [i*W +: W]): mainline yosys cannot
+  // parse multidimensional packed arrays, and OpenLane runs mainline yosys.
+
   // Activation input: one unskewed row-slice per cycle, lane i = K index.
-  input  logic [N-1:0][DW_IN-1:0]  a_row,
+  input  logic [N*DW_IN-1:0]       a_row,
   input  logic                     a_valid,
   input  logic                     swap_row,
   // Sideband travelling with the row, emerging with its result. Carries which
@@ -40,12 +43,12 @@ module systolic_array #(
   input  logic [TAG_W-1:0]         a_tag,
 
   // Weight shift chain into the top of the grid.
-  input  logic [N-1:0][DW_IN-1:0]  w_top,
+  input  logic [N*DW_IN-1:0]       w_top,
   input  logic                     w_shift_en,
   input  logic                     swap_bcast,
 
   // Result output: one deskewed row-slice per cycle, lane j = N index.
-  output logic [N-1:0][DW_ACC-1:0] c_row,
+  output logic [N*DW_ACC-1:0]      c_row,
   output logic                     c_valid,
   output logic [TAG_W-1:0]         c_tag
 );
@@ -56,11 +59,10 @@ module systolic_array #(
   // Gaps in the activation stream must inject zeros, not stale data: an idle
   // PE still accumulates a_in * w_reg into the partial sum flowing past it.
   // This mirrors the golden model, which feeds 0 outside the row range.
-  logic [N-1:0][DW_IN-1:0] a_gated;
-  logic [N-1:0]            swap_bcast_lanes;
-  logic [N-1:0][DW_IN-1:0] a_west;
-  logic [N-1:0][0:0]       swap_west_p;
-  logic [N-1:0]            swap_west;
+  logic [N*DW_IN-1:0] a_gated;
+  logic [N-1:0]       swap_bcast_lanes;
+  logic [N*DW_IN-1:0] a_west;
+  logic [N-1:0]       swap_west;
 
   assign a_gated = a_valid ? a_row : '0;
 
@@ -69,17 +71,11 @@ module systolic_array #(
 
   // Same triangle, one bit wide: every lane is fed the same token so that row
   // i's swap arrives with row i's activation.
-  for (genvar i = 0; i < N; i++) begin : g_swap_in
-    assign swap_bcast_lanes[i] = swap_row & a_valid;
-  end
+  assign swap_bcast_lanes = {N{swap_row & a_valid}};
 
   skew_buffer #(.N(N), .DW(1), .DELAY_ASC(1)) u_skew_swap (
     .clk(clk), .rst_n(rst_n), .en(en),
-    .din(swap_bcast_lanes), .dout(swap_west_p));
-
-  for (genvar i = 0; i < N; i++) begin : g_swap_flat
-    assign swap_west[i] = swap_west_p[i][0];
-  end
+    .din(swap_bcast_lanes), .dout(swap_west));
 
   // ---- skewed weight load ------------------------------------------------
   // The commit ripples diagonally: PE[i][j] takes its shadow on cycle
@@ -92,25 +88,21 @@ module systolic_array #(
   // disturbed until s0'+i+j of the following load, which always trails that
   // column's commit. Without this, overlapping tiles would need M >= 3N-1
   // instead of M >= N+1.
-  logic [N-1:0][DW_IN-1:0] w_top_skewed;
-  logic [N-1:0]            w_shift_lanes;
-  logic [N-1:0][0:0]       w_shift_skewed_p;
-  logic [N-1:0]            w_shift_skewed;
+  logic [N*DW_IN-1:0] w_top_skewed;
+  logic [N-1:0]       w_shift_lanes;
+  logic [N-1:0]       w_shift_skewed;
 
   skew_buffer #(.N(N), .DW(DW_IN), .DELAY_ASC(1)) u_skew_w (
     .clk(clk), .rst_n(rst_n), .en(en), .din(w_top), .dout(w_top_skewed));
 
-  for (genvar j = 0; j < N; j++) begin : g_wshift
-    assign w_shift_lanes[j]  = w_shift_en;
-    assign w_shift_skewed[j] = w_shift_skewed_p[j][0];
-  end
+  assign w_shift_lanes = {N{w_shift_en}};
 
   skew_buffer #(.N(N), .DW(1), .DELAY_ASC(1)) u_skew_wen (
     .clk(clk), .rst_n(rst_n), .en(en),
-    .din(w_shift_lanes), .dout(w_shift_skewed_p));
+    .din(w_shift_lanes), .dout(w_shift_skewed));
 
   // ---- PE grid ----------------------------------------------------------
-  logic [N-1:0][DW_ACC-1:0] psum_south;
+  logic [N*DW_ACC-1:0] psum_south;
 
   pe_array #(.N(N), .DW_IN(DW_IN), .DW_ACC(DW_ACC)) u_grid (
     .clk        (clk),
@@ -129,8 +121,8 @@ module systolic_array #(
     .clk(clk), .rst_n(rst_n), .en(en), .din(psum_south), .dout(c_row));
 
   // Valid and tag track a_valid through the same LATENCY cycles of pipeline.
-  logic [LATENCY-1:0]             valid_sr;
-  logic [LATENCY-1:0][TAG_W-1:0]  tag_sr;
+  logic [LATENCY-1:0]       valid_sr;
+  logic [LATENCY*TAG_W-1:0] tag_sr;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -138,12 +130,13 @@ module systolic_array #(
       tag_sr   <= '0;
     end else if (en) begin
       valid_sr <= {valid_sr[LATENCY-2:0], a_valid};
-      for (int s = LATENCY-1; s > 0; s--) tag_sr[s] <= tag_sr[s-1];
-      tag_sr[0] <= a_tag;
+      for (int s = LATENCY-1; s > 0; s--)
+        tag_sr[s*TAG_W +: TAG_W] <= tag_sr[(s-1)*TAG_W +: TAG_W];
+      tag_sr[0 +: TAG_W] <= a_tag;
     end
   end
 
   assign c_valid = valid_sr[LATENCY-1];
-  assign c_tag   = tag_sr[LATENCY-1];
+  assign c_tag   = tag_sr[(LATENCY-1)*TAG_W +: TAG_W];
 
 endmodule

@@ -13,36 +13,39 @@
 // Used for activations (DW=DW_IN), for the diagonal swap token and valid
 // sideband (DW=1, every lane driven with the same bit), and for results
 // (DW=DW_ACC).
+//
+// Lane vectors are flat (lane i at bits [i*DW +: DW]): mainline yosys cannot
+// parse multidimensional packed arrays, and OpenLane runs mainline yosys.
 module skew_buffer #(
   parameter int N         = 8,
   parameter int DW        = 8,
   parameter bit DELAY_ASC = 1
 ) (
-  input  logic                 clk,
-  input  logic                 rst_n,
-  input  logic                 en,
-  input  logic [N-1:0][DW-1:0] din,
-  output logic [N-1:0][DW-1:0] dout
+  input  logic              clk,
+  input  logic              rst_n,
+  input  logic              en,
+  input  logic [N*DW-1:0]   din,
+  output logic [N*DW-1:0]   dout
 );
 
   for (genvar i = 0; i < N; i++) begin : g_lane
     localparam int D = DELAY_ASC ? i : N - 1 - i;
 
     if (D == 0) begin : g_wire
-      assign dout[i] = din[i];
+      assign dout[i*DW +: DW] = din[i*DW +: DW];
     end else begin : g_delay
-      logic [D-1:0][DW-1:0] sr;
+      logic [D*DW-1:0] sr;
 
       always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
           sr <= '0;
         end else if (en) begin
-          sr[0] <= din[i];
-          for (int k = 1; k < D; k++) sr[k] <= sr[k-1];
+          sr[0 +: DW] <= din[i*DW +: DW];
+          for (int k = 1; k < D; k++) sr[k*DW +: DW] <= sr[(k-1)*DW +: DW];
         end
       end
 
-      assign dout[i] = sr[D-1];
+      assign dout[i*DW +: DW] = sr[(D-1)*DW +: DW];
     end
   end
 

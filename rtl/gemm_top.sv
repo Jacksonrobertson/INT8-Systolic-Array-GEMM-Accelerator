@@ -21,9 +21,9 @@
 // tile must keep arriving while the core is stalled or draining -- that is the
 // entire purpose of the double bank. Only the bank swap is gated, because it
 // is the point where the fill side hands over to the frozen side.
-module gemm_top
-  import gemm_pkg::*;
-#(
+// Package references are fully qualified (gemm_pkg::...): mainline yosys
+// parses qualified references but not wildcard package imports.
+module gemm_top #(
   parameter int N     = 8,
   parameter int M_MAX = 256
 ) (
@@ -32,9 +32,9 @@ module gemm_top
 
   // Configuration (SPEC section 6.2), sampled at start.
   input  logic                  start,
-  input  logic [DIM_W-1:0]      cfg_m,
-  input  logic [DIM_W-1:0]      cfg_k,
-  input  logic [DIM_W-1:0]      cfg_n,
+  input  logic [gemm_pkg::DIM_W-1:0]      cfg_m,
+  input  logic [gemm_pkg::DIM_W-1:0]      cfg_k,
+  input  logic [gemm_pkg::DIM_W-1:0]      cfg_n,
   // Optional INT8 output stage (SPEC sections 6.2 and 7). When quant_en is
   // set, each lane's INT32 result is ReLU'd and requantized to INT8 and the N
   // bytes are packed into the LOW N*8 bits of m_axis_c_tdata, upper bits zero.
@@ -48,19 +48,19 @@ module gemm_top
   // Weights: one tile column per beat.
   input  logic                  s_axis_w_tvalid,
   output logic                  s_axis_w_tready,
-  input  logic [N*DW_IN-1:0]    s_axis_w_tdata,
+  input  logic [N*gemm_pkg::DW_IN-1:0]    s_axis_w_tdata,
   input  logic                  s_axis_w_tlast,
 
   // Activations: one row-slice per beat.
   input  logic                  s_axis_a_tvalid,
   output logic                  s_axis_a_tready,
-  input  logic [N*DW_IN-1:0]    s_axis_a_tdata,
+  input  logic [N*gemm_pkg::DW_IN-1:0]    s_axis_a_tdata,
   input  logic                  s_axis_a_tlast,
 
   // Results: one row-slice per beat.
   output logic                  m_axis_c_tvalid,
   input  logic                  m_axis_c_tready,
-  output logic [N*DW_ACC-1:0]   m_axis_c_tdata,
+  output logic [N*gemm_pkg::DW_ACC-1:0]   m_axis_c_tdata,
   output logic                  m_axis_c_tlast
 );
 
@@ -73,8 +73,8 @@ module gemm_top
   logic [LOG2N-1:0] wb_rd_row;
   logic             w_shift_en, swap_bcast, swap_row, a_stream, a_fire;
   logic [1:0]       a_tag;
-  logic [DIM_W-1:0] dim_m, dim_n;
-  state_e           state;
+  logic [gemm_pkg::DIM_W-1:0] dim_m, dim_n;
+  gemm_pkg::state_e           state;
 
   gemm_ctrl #(.N(N), .M_MAX(M_MAX)) u_ctrl (
     .clk          (clk),
@@ -115,12 +115,12 @@ module gemm_top
   assign a_fire          = s_axis_a_tvalid && s_axis_a_tready;
 
   // ---- weight buffer -----------------------------------------------------
-  logic [N-1:0][DW_IN-1:0] wb_col_data, wb_w_row;
+  logic [N*gemm_pkg::DW_IN-1:0] wb_col_data, wb_w_row;
 
   assign wb_col_data        = s_axis_w_tdata;
   assign wb_bank_swap_gated = wb_bank_swap && core_en;
 
-  weight_buffer #(.N(N), .DW_IN(DW_IN)) u_wbuf (
+  weight_buffer #(.N(N), .DW_IN(gemm_pkg::DW_IN)) u_wbuf (
     .clk       (clk),
     .rst_n     (rst_n),
     .col_data  (wb_col_data),
@@ -133,14 +133,14 @@ module gemm_top
   );
 
   // ---- compute datapath --------------------------------------------------
-  logic [N-1:0][DW_IN-1:0]  arr_a_row;
-  logic [N-1:0][DW_ACC-1:0] arr_c_row;
+  logic [N*gemm_pkg::DW_IN-1:0]  arr_a_row;
+  logic [N*gemm_pkg::DW_ACC-1:0] arr_c_row;
   logic                     arr_c_valid;
   logic [1:0]               arr_c_tag;
 
   assign arr_a_row = s_axis_a_tdata;
 
-  systolic_array #(.N(N), .DW_IN(DW_IN), .DW_ACC(DW_ACC), .TAG_W(2)) u_array (
+  systolic_array #(.N(N), .DW_IN(gemm_pkg::DW_IN), .DW_ACC(gemm_pkg::DW_ACC), .TAG_W(2)) u_array (
     .clk        (clk),
     .rst_n      (rst_n),
     .en         (core_en),
@@ -162,7 +162,7 @@ module gemm_top
   // Result rows arrive in order, so their address is just a wrapping count of
   // rows seen this pass. The tag rides with the row rather than being read
   // from the FSM, so the accumulator stays correct once tiles overlap.
-  logic [DIM_W-1:0] acc_row;
+  logic [gemm_pkg::DIM_W-1:0] acc_row;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -173,10 +173,10 @@ module gemm_top
   end
 
   logic                     acc_out_valid;
-  logic [ADDR_W-1:0]        acc_out_addr;
-  logic [N-1:0][DW_ACC-1:0] acc_out_data;
+  logic [ADDR_W-1:0]   acc_out_addr;
+  logic [N*gemm_pkg::DW_ACC-1:0] acc_out_data;
 
-  accum_ram #(.N(N), .DW_ACC(DW_ACC), .M_MAX(M_MAX)) u_acc (
+  accum_ram #(.N(N), .DW_ACC(gemm_pkg::DW_ACC), .M_MAX(M_MAX)) u_acc (
     .clk       (clk),
     .rst_n     (rst_n),
     .en        (core_en),
@@ -202,7 +202,7 @@ module gemm_top
   // includes out_blocked, so core_en && acc_out_valid guarantees this register
   // can take the row -- the transfer needs no separate handshake.
   logic                     oq_valid, oq_last;
-  logic [N*DW_ACC-1:0]      oq_data;
+  logic [N*gemm_pkg::DW_ACC-1:0]      oq_data;
   logic                     oq_load;
 
   assign oq_can_accept = !oq_valid || m_axis_c_tready;
@@ -211,27 +211,27 @@ module gemm_top
   // ---- optional ReLU + requantization ------------------------------------
   // One unit per lane, combinational, selected as the row is captured into the
   // output register so the quantized path costs no extra cycle.
-  logic [N-1:0][7:0]   q_lane;
-  logic [N*DW_ACC-1:0] out_mux;
+  logic [N*8-1:0]      q_lane;
+  logic [N*gemm_pkg::DW_ACC-1:0] out_mux;
 
   for (genvar j = 0; j < N; j++) begin : g_requant
-    requant_unit #(.DW_ACC(DW_ACC)) u_rq (
-      .acc     (acc_out_data[j]),
+    requant_unit #(.DW_ACC(gemm_pkg::DW_ACC)) u_rq (
+      .acc     (acc_out_data[j*gemm_pkg::DW_ACC +: gemm_pkg::DW_ACC]),
       .mult    (cfg_mult),
       .shift   (cfg_shift),
       .relu_en (1'b1),
-      .q       (q_lane[j])
+      .q       (q_lane[j*8 +: 8])
     );
   end
 
-  assign out_mux = cfg_quant_en ? {{(N*DW_ACC - N*8){1'b0}}, q_lane}
+  assign out_mux = cfg_quant_en ? {{(N*gemm_pkg::DW_ACC - N*8){1'b0}}, q_lane}
                                 : acc_out_data;
 
   // tlast marks the final beat of the whole GEMM. Counted as rows leave the
   // accumulator rather than read from the FSM's current tile, so it stays
   // correct however far the output trails the schedule.
-  logic [DIM_W-1:0] out_row, out_nt;
-  wire  [DIM_W-1:0] nt_max   = (dim_n >> LOG2N) - 1'b1;
+  logic [gemm_pkg::DIM_W-1:0] out_row, out_nt;
+  wire  [gemm_pkg::DIM_W-1:0] nt_max   = (dim_n >> LOG2N) - 1'b1;
   wire              out_done = (out_row == dim_m - 1'b1) && (out_nt == nt_max);
 
   always_ff @(posedge clk or negedge rst_n) begin

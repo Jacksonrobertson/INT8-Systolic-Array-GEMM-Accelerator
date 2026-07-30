@@ -74,7 +74,7 @@ tb/                   SystemVerilog testbenches
 tb/cocotb/            constrained-random cocotb bench + functional coverage
 sim/                  Verilator build (make / make lint / make top STALL=30)
 sim/wave.sh           run one small GEMM and open it in GTKWave
-flow/                 Phase 4 OpenLane/Sky130 prep (sv2v step, config, sweep)
+flow/                 Phase 4 OpenLane/Sky130 prep (config, sweep, yosys audit)
 ```
 
 ## Running the RTL tests

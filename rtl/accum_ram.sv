@@ -26,25 +26,28 @@ module accum_ram #(
   input  logic                     rst_n,
   input  logic                     en,        // global clock enable / stall
 
+  // Lane vectors are flat (lane j at bits [j*DW_ACC +: DW_ACC]): mainline
+  // yosys cannot parse multidimensional packed arrays, and OpenLane runs it.
+
   // A finished result row from the array's deskew stage.
   input  logic                     in_valid,
   input  logic [ADDR_W-1:0]        in_addr,   // row index within the pass
-  input  logic [N-1:0][DW_ACC-1:0] in_data,
+  input  logic [N*DW_ACC-1:0]      in_data,
   input  logic                     in_first,  // kt==0: initialise, do not add
   input  logic                     in_last,   // final kt: emit the row
 
   // Finished output rows, two cycles behind the corresponding in_valid.
   output logic                     out_valid,
   output logic [ADDR_W-1:0]        out_addr,
-  output logic [N-1:0][DW_ACC-1:0] out_data
+  output logic [N*DW_ACC-1:0]      out_data
 );
 
-  logic [N-1:0][DW_ACC-1:0] mem [0:M_MAX-1];
+  logic [N*DW_ACC-1:0] mem [0:M_MAX-1];
 
   // ---- stage 1: read issue ---------------------------------------------
-  logic                     s1_valid, s1_first, s1_last;
-  logic [ADDR_W-1:0]        s1_addr;
-  logic [N-1:0][DW_ACC-1:0] s1_data, rd_q;
+  logic                s1_valid, s1_first, s1_last;
+  logic [ADDR_W-1:0]   s1_addr;
+  logic [N*DW_ACC-1:0] s1_data, rd_q;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -67,11 +70,13 @@ module accum_ram #(
   // ---- stage 2: accumulate, write back, emit ---------------------------
   // Lane-wise INT32 adds. This must NOT be one wide addition: a carry out of
   // lane j would corrupt lane j+1.
-  logic [N-1:0][DW_ACC-1:0] sum;
+  logic [N*DW_ACC-1:0] sum;
 
   always_comb begin
     for (int j = 0; j < N; j++) begin
-      sum[j] = (s1_first ? DW_ACC'(0) : rd_q[j]) + s1_data[j];
+      sum[j*DW_ACC +: DW_ACC] =
+        (s1_first ? DW_ACC'(0) : rd_q[j*DW_ACC +: DW_ACC])
+        + s1_data[j*DW_ACC +: DW_ACC];
     end
   end
 

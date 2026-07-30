@@ -7,26 +7,32 @@ lives, and **one RTL change made because of what implementation showed** —
 the "RTL designer who understands physical design" proof.
 
 **Status of this document:** prep. Everything in §1 was *measured* on this
-repo (yosys 0.33, sv2v 0.0.12, Verilator 5.020); §2–§6 are the plan.
+repo (yosys 0.33, Verilator 5.020); §2–§6 are the plan.
 
 ---
 
 ## 1. Synthesizability audit — findings (verified)
 
-Run `make -C flow sv2v audit` to reproduce.
+Run `make -C flow audit` to reproduce.
 
-1. **Mainline yosys cannot parse this RTL.** The frontend rejects
-   multidimensional packed array ports (`logic [N-1:0][DW_IN-1:0]`), used
-   throughout. OpenLane runs yosys, so the flow consumes an **sv2v**
-   conversion instead: `flow/Makefile` generates
-   `flow/openlane/gemm_top.sv2v.v`, which elaborates in yosys and lints
-   clean (0 errors) in Verilator. Regenerate after any `rtl/` change — CI
-   should eventually diff the checked-in copy against a fresh conversion.
+1. **Mainline yosys could not parse the original RTL — fixed at the
+   source.** The yosys frontend rejects multidimensional packed array ports
+   (`logic [N-1:0][DW_IN-1:0]`) and wildcard package imports
+   (`import gemm_pkg::*`), both used throughout. Rather than carrying an
+   sv2v conversion step (tried first, worked, then retired), the RTL was
+   refactored to yosys-parseable SystemVerilog: lane buses are flat vectors
+   indexed with `[i*W +: W]` part-selects, and package references are fully
+   qualified (`gemm_pkg::DIM_W` — the one form yosys accepts). Unpacked
+   arrays (`mem[2][N]`) and the elaborated structure are unchanged; yosys
+   produces the identical 1,832-cell design either way. The full regression
+   (lint, 15 SV testbenches, complete cocotb session with coverage closure)
+   passes on the refactored RTL, and `make -C flow audit` gates the
+   parseability from here on.
 
 2. **The accumulation RAM is the area problem, exactly as PHASE2_RTL §8
    predicted.** It infers correctly as a single synchronous memory
-   (`$mem_v2` — the RMW pattern survives sv2v), but OpenLane has no free
-   Sky130 SRAM to map it to, so it becomes flip-flops:
+   (`$mem_v2`), but OpenLane has no free Sky130 SRAM to map it to, so it
+   becomes flip-flops:
    - `M_MAX=256`, N=8: 256×256 b = **65,536 flops** — untenable (~1.3 mm²
      of DFF area alone at ~20 µm²/flop in sky130hd).
    - `M_MAX=32`, N=8: 8,192 flops — fine. **Decision: implement at
@@ -58,7 +64,6 @@ Your home turf — pin versions and go:
 - **OpenLane 2** (nix install) + **sky130A** via `ciel`/`volare`. Record
   the OpenLane version and PDK hash in the writeup; PPA numbers without
   pinned tools aren't reproducible claims.
-- `sv2v` static binary from github.com/zachjs/sv2v (v0.0.12 verified).
 - Starting files are in `flow/openlane/`: `config.json` (documented
   choices: `SYNTH_NO_FLAT` for the hierarchical area breakdown,
   clock-gating on — see §5, util/density starting points) and
