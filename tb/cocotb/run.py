@@ -3,6 +3,7 @@
   python tb/cocotb/run.py                 # N=4 and N=8, default seed/counts
   python tb/cocotb/run.py --seed 1234     # reproduce a session exactly
   python tb/cocotb/run.py -n 4 --random-count 50
+  python tb/cocotb/run.py -n 4 --testcase test_smoke_full_rate --waves
 
 Builds gemm_top with Verilator (+define+SIM_ASSERT, so the Phase 2 SVA set is
 armed), runs every cocotb test, then merges each build's functional-coverage
@@ -25,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from coverage import Coverage  # noqa: E402
 
 
-def build_and_test(n, seed, random_count, waves):
+def build_and_test(n, seed, random_count, waves, testcase=None):
     from cocotb.runner import get_runner
 
     rtl = sorted((ROOT / "rtl").glob("*.sv"))
@@ -52,6 +53,7 @@ def build_and_test(n, seed, random_count, waves):
     results = runner.test(
         test_module="test_gemm_top",
         hdl_toplevel="gemm_top",
+        testcase=testcase,
         seed=seed,
         build_dir=str(build_dir),
         test_dir=str(build_dir),
@@ -62,6 +64,11 @@ def build_and_test(n, seed, random_count, waves):
                  os.environ.get("PYTHONPATH", "")]),
             "COVERAGE_FILE": str(cov_file),
             "RANDOM_COUNT": str(random_count),
+            # Forwarded explicitly so test_wave_custom's skip= predicate, which
+            # is evaluated when the sim process imports the module, sees them.
+            **{v: os.environ[v] for v in
+               ("WAVE_DIMS", "WAVE_QUANT", "WAVE_MULT", "WAVE_SHIFT")
+               if v in os.environ},
         },
     )
 
@@ -81,6 +88,8 @@ def main():
                     help="constrained-random iterations per build "
                          "(default: 25 at N=4, 10 at N=8)")
     ap.add_argument("--waves", action="store_true", help="dump FST waves")
+    ap.add_argument("--testcase", help="run only this test (comma-separated for "
+                                      "several); default: the whole module")
     args = ap.parse_args()
 
     sizes = args.n or [4, 8]
@@ -91,7 +100,8 @@ def main():
     for n in sizes:
         count = args.random_count if args.random_count is not None \
             else (25 if n == 4 else 10)
-        failed, cov_file = build_and_test(n, seed, count, args.waves)
+        failed, cov_file = build_and_test(n, seed, count, args.waves,
+                                          args.testcase)
         failed_total += failed
         cov_files.append(cov_file)
 

@@ -38,6 +38,7 @@ Phase 2 implementation report, including a correction to the spec's zero-bubble
 bound: **[docs/PHASE2_RTL.md](docs/PHASE2_RTL.md)**.
 Phase 3 verification report, including the coverage model and mutation
 checks: **[docs/PHASE3_VERIFICATION.md](docs/PHASE3_VERIFICATION.md)**.
+Looking at a single GEMM in GTKWave: **[docs/WAVEFORMS.md](docs/WAVEFORMS.md)**.
 
 ## Golden model
 
@@ -72,6 +73,7 @@ rtl/                  SystemVerilog RTL
 tb/                   SystemVerilog testbenches
 tb/cocotb/            constrained-random cocotb bench + functional coverage
 sim/                  Verilator build (make / make lint / make top STALL=30)
+sim/wave.sh           run one small GEMM and open it in GTKWave
 ```
 
 ## Running the RTL tests

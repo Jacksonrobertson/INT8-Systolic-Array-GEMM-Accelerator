@@ -386,3 +386,24 @@ async def test_constrained_random(dut):
                 await RisingEdge(dut.clk)
         cocotb.log.info("random run %d/%d complete", i + 1, count)
     cov.flush()
+
+
+# ---- waveform helper -------------------------------------------------------
+
+# Not part of the regression: skipped unless WAVE_DIMS is set, which sim/wave.sh
+# does. Exists so a waveform can be generated at hand-picked dimensions rather
+# than whatever a directed test happens to use.
+@cocotb.test(skip=not os.environ.get("WAVE_DIMS"))
+async def test_wave_custom(dut):
+    """One GEMM at the dimensions in WAVE_DIMS ("MxKxN"), for wave viewing.
+    WAVE_QUANT=1 turns on requantization with WAVE_MULT/WAVE_SHIFT."""
+    import random
+    m, k, nn = (int(v) for v in os.environ["WAVE_DIMS"].lower().split("x"))
+    quant = os.environ.get("WAVE_QUANT", "0") == "1"
+    rng = random.Random(_seed() ^ 0x7A7E)
+    cov = Coverage()
+    await reset(dut)
+    await run_gemm(dut, rng, cov, m=m, k=k, nn=nn, quant=quant,
+                   mult=int(os.environ.get("WAVE_MULT", "1")),
+                   shift=int(os.environ.get("WAVE_SHIFT", "0")))
+    cov.flush()

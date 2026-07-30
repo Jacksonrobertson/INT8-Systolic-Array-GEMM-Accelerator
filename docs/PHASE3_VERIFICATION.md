@@ -104,8 +104,27 @@ pip install numpy "cocotb==1.9.2"    # plus Verilator 5.x on PATH
 python tb/cocotb/run.py              # full session: N=4 + N=8, random seed
 python tb/cocotb/run.py --seed 42    # reproduce a session exactly
 python tb/cocotb/run.py -n 4 --random-count 50 --waves
+python tb/cocotb/run.py -n 4 --testcase test_smoke_full_rate   # just one test
 ```
 
 Every failure message carries the run's full configuration
 (`M/K/N/n/stalls/quant/seed`), so any red run is reproducible from its log
 line alone.
+
+## 7. Waveforms
+
+`sim/wave.sh` runs one small GEMM with tracing on and opens it in GTKWave:
+
+```bash
+sudo apt install gtkwave
+sim/wave.sh              # smallest real matmul: 2x2 * 2x2, 29 cycles
+sim/wave.sh -d 8x4x4     # two activation tiles down a 4x4 array
+sim/wave.sh -v full      # 82 traces instead of 41
+```
+
+`-d MxKxN` drives `test_wave_custom`, which is skipped unless `WAVE_DIMS` is
+set and so never runs in a regression session.
+
+See **[docs/WAVEFORMS.md](WAVEFORMS.md)** for the view layouts, number
+formats, why the array size must be a power of two, and the GTKWave save-file
+gotchas behind `sim/waves/gen_gtkw.py`.

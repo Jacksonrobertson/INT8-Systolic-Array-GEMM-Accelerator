@@ -1,0 +1,203 @@
+"""Generate a GTKWave save file from a VCD, with correct bit ranges.
+
+  python sim/waves/gen_gtkw.py <dump.vcd> <view> <out.gtkw>
+
+GTKWave binds a vector only when the trace name carries its *full* declared
+range (`cfg_m[15:0]`); a bare name binds a single bit instead, and a partial
+slice (`c_row[31:0]` on a [63:0] signal) is dropped without a warning. Those
+ranges change with the array size N, so the save file is generated per run
+rather than checked in.
+
+Trace-flag values below were confirmed against GTKWave 3.3.116 by round-trip
+(hand-write a save file, let GTKWave rewrite it, keep what survived):
+
+  @28   single bit          @24   decimal
+  @22   hex                 @824  signed decimal
+  @200  group label (a following "-name" line)
+"""
+
+import sys
+
+BIT, HEX, DEC, SDEC = "@28", "@22", "@24", "@824"
+
+# Packed lanes stay hex: one bus carries N independent INT8 or INT32 values, so
+# a single decimal reading of the whole bus would be meaningless. Scalars that
+# really are one signed number get signed decimal.
+CONTROL = [
+    ("command", [
+        ("clk", BIT), ("rst_n", BIT), ("start", BIT),
+        ("busy", BIT), ("done", BIT),
+        ("cfg_m", DEC), ("cfg_k", DEC), ("cfg_n", DEC),
+    ]),
+    ("FSM and tile counters", [
+        ("gemm_top.u_ctrl.state", HEX),
+        ("gemm_top.u_ctrl.kt", DEC), ("gemm_top.u_ctrl.nt", DEC),
+        ("gemm_top.u_ctrl.row_cnt", DEC),
+    ]),
+    ("weights in, and the control that lands them", [
+        ("s_axis_w_tvalid", BIT), ("s_axis_w_tready", BIT),
+        ("s_axis_w_tdata", HEX), ("s_axis_w_tlast", BIT),
+        ("gemm_top.u_wbuf.fill_full", BIT),
+        ("gemm_top.u_wbuf.bank_swap", BIT),
+        ("gemm_top.u_array.w_shift_en", BIT),
+        ("gemm_top.u_array.swap_bcast", BIT),
+        ("gemm_top.u_array.u_grid.g_row[0].g_col[0].u_pe.w_reg", SDEC),
+    ]),
+    ("activations in, and the rows the array sees", [
+        ("s_axis_a_tvalid", BIT), ("s_axis_a_tready", BIT),
+        ("s_axis_a_tdata", HEX), ("s_axis_a_tlast", BIT),
+        ("gemm_top.u_array.a_valid", BIT),
+        ("gemm_top.u_array.a_row", HEX),
+        ("gemm_top.u_array.swap_row", BIT),
+    ]),
+    ("PE[0][0]: the numbers actually being multiplied", [
+        ("gemm_top.u_array.u_grid.g_row[0].g_col[0].u_pe.a_in", SDEC),
+        ("gemm_top.u_array.u_grid.g_row[0].g_col[0].u_pe.prod", SDEC),
+        ("gemm_top.u_array.u_grid.g_row[0].g_col[0].u_pe.psum_in", SDEC),
+        ("gemm_top.u_array.u_grid.g_row[0].g_col[0].u_pe.psum_out", SDEC),
+    ]),
+    ("array out, into the accumulator", [
+        ("gemm_top.u_array.c_valid", BIT),
+        ("gemm_top.u_array.c_row", HEX),
+        ("gemm_top.u_acc.in_first", BIT), ("gemm_top.u_acc.in_last", BIT),
+        ("gemm_top.u_acc.in_addr", DEC),
+    ]),
+    ("result out", [
+        ("m_axis_c_tvalid", BIT), ("m_axis_c_tready", BIT),
+        ("m_axis_c_tdata", HEX), ("m_axis_c_tlast", BIT),
+    ]),
+]
+
+FULL = CONTROL + [
+    ("weight loader FSM", [
+        ("gemm_top.u_ctrl.wl_state", HEX), ("gemm_top.u_ctrl.wl_cnt", DEC),
+        ("gemm_top.u_ctrl.shadow_ready", BIT),
+        ("gemm_top.u_ctrl.shadow_settled", BIT),
+        ("gemm_top.u_ctrl.need_swap", BIT),
+        ("gemm_top.u_ctrl.hold_cnt", DEC),
+        ("gemm_top.u_ctrl.l_kt", DEC), ("gemm_top.u_ctrl.l_nt", DEC),
+        ("gemm_top.u_ctrl.l_done", BIT),
+    ]),
+    ("flow control", [
+        ("gemm_top.core_en", BIT), ("gemm_top.in_starved", BIT),
+        ("gemm_top.out_blocked", BIT), ("gemm_top.oq_can_accept", BIT),
+        ("gemm_top.a_stream", BIT), ("gemm_top.a_fire", BIT),
+        ("gemm_top.u_ctrl.last_tile", BIT), ("gemm_top.u_ctrl.last_row", BIT),
+        ("gemm_top.u_ctrl.drain_cnt", DEC),
+    ]),
+    ("weight buffer", [
+        ("gemm_top.u_wbuf.col_valid", BIT), ("gemm_top.u_wbuf.col_ready", BIT),
+        ("gemm_top.u_wbuf.fill_bank", BIT), ("gemm_top.u_wbuf.col_cnt", DEC),
+        ("gemm_top.u_wbuf.rd_row", DEC), ("gemm_top.u_wbuf.w_row", HEX),
+    ]),
+    ("skew network edges", [
+        ("gemm_top.u_array.w_top", HEX),
+        ("gemm_top.u_array.a_west", HEX),
+        ("gemm_top.u_array.a_tag", DEC), ("gemm_top.u_array.c_tag", DEC),
+        ("gemm_top.u_array.psum_south", HEX),
+    ]),
+    ("PE[0][0] weight registers", [
+        ("gemm_top.u_array.u_grid.g_row[0].g_col[0].u_pe.w_shadow", SDEC),
+        ("gemm_top.u_array.u_grid.g_row[0].g_col[0].u_pe.w_in", SDEC),
+        ("gemm_top.u_array.u_grid.g_row[0].g_col[0].u_pe.swap_in", BIT),
+    ]),
+    ("accumulator", [
+        ("gemm_top.u_acc.in_data", HEX), ("gemm_top.u_acc.out_valid", BIT),
+        ("gemm_top.u_acc.out_addr", DEC), ("gemm_top.u_acc.out_data", HEX),
+    ]),
+    ("requantizer lane 0", [
+        ("gemm_top.g_requant[0].u_rq.acc", SDEC),
+        ("gemm_top.g_requant[0].u_rq.q", SDEC),
+        ("gemm_top.cfg_quant_en", BIT),
+        ("cfg_mult", DEC), ("cfg_shift", DEC),
+    ]),
+]
+
+VIEWS = {"control": CONTROL, "full": FULL}
+
+HEADER = """\
+[*] Generated by sim/waves/gen_gtkw.py -- do not edit, regenerate.
+[*] View: {view}   Array size N={n}
+[*]
+[*] u_ctrl.state is one-hot (gemm_pkg::state_e), shown in hex:
+[*]   01 IDLE  02 LOAD_W  04 SWAP  08 COMPUTE  10 DRAIN  20 DONE
+[*] u_ctrl.wl_state likewise: 1 WL_IDLE  2 WL_SHIFT  4 WL_SETTLE
+[*]
+[*] Packed buses (tdata, a_row, c_row, w_row, psum_south) carry N independent
+[*] lanes, so they stay hex. GTKWave save files cannot express a partial slice,
+[*] so per-lane decimal has to be done in the GUI: select the trace, then
+[*] Edit > Data Format > Signed Decimal after Edit > Insert Analog Extension,
+[*] or just read the lanes off the hex digits.
+[dumpfile_mtime] 0
+[timestart] 0
+[sst_width] 280
+[signals_width] 340
+[sst_expanded] 1
+[sst_vpaned_height] 380
+"""
+
+
+def vcd_widths(path):
+    """Map hierarchical name -> declared range suffix ("" for 1-bit signals)."""
+    widths, scope = {}, []
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if line.startswith("$scope"):
+                p = line.split()
+                scope.append(p[2] if len(p) > 3 else "TOP")
+            elif line.startswith("$upscope"):
+                if scope:
+                    scope.pop()
+            elif line.startswith("$var"):
+                p = line.split()
+                name = ".".join(scope + [p[4]])
+                # Key off the declared width, not the presence of a range: at
+                # N=2 a $clog2(N)-wide signal is declared `wire 1 ... [0:0]`,
+                # and GTKWave drops a scalar that carries a range suffix.
+                widths[name] = p[5] if int(p[2]) > 1 and len(p) > 6 else ""
+            elif line.startswith("$enddefinitions"):
+                break
+    return widths
+
+
+def main():
+    if len(sys.argv) != 4 or sys.argv[2] not in VIEWS:
+        sys.exit(f"usage: {sys.argv[0]} <dump.vcd> <{'|'.join(VIEWS)}> <out.gtkw>")
+    dump, view, out = sys.argv[1:]
+    widths = vcd_widths(dump)
+
+    # N is recoverable from the activation bus: one INT8 lane per array column.
+    rng = widths.get("TOP.s_axis_a_tdata", "")
+    n = (int(rng[1:rng.index(":")]) + 1) // 8 if rng else 0
+
+    lines, missing, count = [HEADER.format(view=view, n=n)], [], 0
+    for label, sigs in VIEWS[view]:
+        lines.append("@200\n-" + label)
+        for sig, fmt in sigs:
+            full = "TOP." + sig
+            if full not in widths:
+                missing.append(full)
+                continue
+            rng = widths[full]
+            # A 1-bit signal must not carry a range, and a vector must; getting
+            # this backwards is exactly what silently drops the trace.
+            lines.append(BIT if not rng else fmt)
+            lines.append(full + rng)
+            count += 1
+    lines.append("[pattern_trace] 1\n[pattern_trace] 0")
+
+    with open(out, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+    if missing:
+        print(f"gen_gtkw: {len(missing)} signal(s) not in {dump}:", file=sys.stderr)
+        for m in missing:
+            print(f"  {m}", file=sys.stderr)
+        return 1
+    print(f"gen_gtkw: {view} view, {count} traces, N={n} -> {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
