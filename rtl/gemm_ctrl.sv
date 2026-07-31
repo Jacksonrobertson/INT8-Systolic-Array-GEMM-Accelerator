@@ -81,8 +81,11 @@ module gemm_ctrl #(
   localparam int LOG2N     = $clog2(N);
   localparam int LATENCY   = 2 * N - 1;
   // After the final activation row: LATENCY for it to reach the deskew output,
-  // plus the accumulator's 2 stages.
-  localparam int DRAIN_CYC = LATENCY + 2;
+  // plus the accumulator's 2 stages, plus the rq output pipeline stage
+  // (Phase 4 requant pipelining) -- so `done` implies every row has at least
+  // reached the output register, and a restart cannot reset the beat counters
+  // while a row is still in flight behind them.
+  localparam int DRAIN_CYC = LATENCY + 3;
   localparam int DRAIN_W   = $clog2(DRAIN_CYC + 1);
   localparam int SET_W     = $clog2(N + 1);
   localparam int HOLD_W    = $clog2(N + 1);

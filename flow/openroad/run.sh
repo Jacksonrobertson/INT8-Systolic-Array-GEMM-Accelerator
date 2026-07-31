@@ -18,15 +18,18 @@ export LIB=$HD/lib/sky130_fd_sc_hd__tt_025C_1v80.lib
 export TLEF=$HD/techlef/sky130_fd_sc_hd__nom.tlef
 export LEF=$HD/lef/sky130_fd_sc_hd.lef
 export SITE_TRACKS=$ROOT/flow/openroad/sky130hd.tracks
-export RTL_DIR=$ROOT/rtl
+# Overridable so an A/B sweep can point the same flow at a pinned RTL snapshot
+# (e.g. a git worktree) while results land in this repo.
+export RTL_DIR=${RTL_DIR:-$ROOT/rtl}
 
-PERIODS="25 15 10 8 6"; SIZES="8"; MMAX=32; UTIL=40
-while getopts "p:n:m:u:h" o; do
+PERIODS="25 15 10 8 6"; SIZES="8"; MMAX=32; UTIL=40; VARIANT=base
+while getopts "p:n:m:u:v:h" o; do
   case $o in
     p) PERIODS=$OPTARG ;;
     n) SIZES=$OPTARG ;;
     m) MMAX=$OPTARG ;;
     u) UTIL=$OPTARG ;;
+    v) VARIANT=$OPTARG ;;
     h) sed -n '2,10p' "$0"; exit 0 ;;
     *) exit 2 ;;
   esac
@@ -34,11 +37,11 @@ done
 
 CSV=$ROOT/flow/results/sweep.csv
 mkdir -p "$ROOT/flow/results"
-[ -f "$CSV" ] || echo "n,m_max,period_ns,cells,area_um2,util_pct,wns_ns,tns_ns,hold_wns_ns,power_mw" > "$CSV"
+[ -f "$CSV" ] || echo "variant,n,m_max,period_ns,cells,area_um2,util_pct,wns_ns,tns_ns,hold_wns_ns,power_mw" > "$CSV"
 
 for n in $SIZES; do
   for p in $PERIODS; do
-    tag="n${n}_m${MMAX}_p${p}"
+    tag="${VARIANT}_n${n}_m${MMAX}_p${p}"
     out=$ROOT/flow/results/$tag
     mkdir -p "$out"
     echo "=== $tag: synthesis ==="
@@ -49,7 +52,7 @@ for n in $SIZES; do
     NETLIST=$out/gemm_top.synth.v PERIOD_NS=$p UTIL=$UTIL OUT=$out \
       openroad -no_init -exit "$ROOT/flow/openroad/pnr.tcl" > "$out/pnr.log" 2>&1 \
       || { tail -20 "$out/pnr.log"; exit 1; }
-    python3 "$ROOT/flow/openroad/summarize.py" "$out" "$n" "$MMAX" "$p" >> "$CSV"
+    python3 "$ROOT/flow/openroad/summarize.py" "$out" "$n" "$MMAX" "$p" "$VARIANT" >> "$CSV"
     tail -1 "$CSV"
   done
 done

@@ -101,12 +101,14 @@ module gemm_top #(
   );
 
   // ---- stall generation --------------------------------------------------
-  // The core stalls when a required activation beat is absent, or when the
-  // accumulator is holding a finished row the output register cannot take.
+  // The core stalls when a required activation beat is absent, or when the rq
+  // pipeline stage is holding a finished row the output register cannot take.
   logic in_starved, out_blocked, oq_can_accept;
+  logic                          rq_valid;   // output pipeline stage, below
+  logic [N*gemm_pkg::DW_ACC-1:0] rq_raw;
 
   assign in_starved  = a_stream && !s_axis_a_tvalid;
-  assign out_blocked = acc_out_valid && !oq_can_accept;
+  assign out_blocked = rq_valid && !oq_can_accept;
   assign core_en     = !in_starved && !out_blocked;
 
   // tready may depend on tvalid; only tvalid is forbidden from waiting on
@@ -190,32 +192,53 @@ module gemm_top #(
     .out_data  (acc_out_data)
   );
 
+  // ---- output pipeline stage (rq) ----------------------------------------
+  // Phase 4 addition: the P&R study measured the combinational requant cone
+  // (ReLU -> 24x32 multiply -> shift -> clamp) at ~18 ns, the design's
+  // critical path. This stage splits it: the requant units register their
+  // multiply internally (same `en`), and rq_raw carries the raw INT32 row in
+  // lockstep so both output modes share one latency. The stage lives inside
+  // the core_en domain, so the stall model is unchanged -- everything
+  // upstream of oq freezes coherently; only oq decouples.
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      rq_valid <= 1'b0;
+      rq_raw   <= '0;
+    end else if (core_en) begin
+      rq_valid <= acc_out_valid;
+      rq_raw   <= acc_out_data;
+    end
+  end
+
   // ---- output stream -----------------------------------------------------
   // A one-deep output register decouples m_axis_c from core_en. Without it,
   // the core stalling for want of an activation beat would freeze the
-  // accumulator with out_valid still asserted, and a ready consumer would
-  // accept the same row on every stalled cycle. Deasserting tvalid instead is
-  // not an option: AXI-Stream requires tvalid to stay asserted once raised
-  // until the handshake completes (SPEC section 6.1).
+  // pipeline with a row still offered, and a ready consumer would accept the
+  // same row on every stalled cycle. Deasserting tvalid instead is not an
+  // option: AXI-Stream requires tvalid to stay asserted once raised until the
+  // handshake completes (SPEC section 6.1).
   //
-  // The accumulator is only advanced when core_en is high, and core_en already
-  // includes out_blocked, so core_en && acc_out_valid guarantees this register
-  // can take the row -- the transfer needs no separate handshake.
+  // The rq stage only advances when core_en is high, and core_en already
+  // includes out_blocked, so core_en && rq_valid guarantees this register can
+  // take the row -- the transfer needs no separate handshake.
   logic                     oq_valid, oq_last;
   logic [N*gemm_pkg::DW_ACC-1:0]      oq_data;
   logic                     oq_load;
 
   assign oq_can_accept = !oq_valid || m_axis_c_tready;
-  assign oq_load       = acc_out_valid && core_en;
+  assign oq_load       = rq_valid && core_en;
 
   // ---- optional ReLU + requantization ------------------------------------
-  // One unit per lane, combinational, selected as the row is captured into the
-  // output register so the quantized path costs no extra cycle.
+  // One unit per lane, multiply registered inside (see requant_unit.sv), so
+  // q_lane lines up with rq_raw/rq_valid.
   logic [N*8-1:0]      q_lane;
   logic [N*gemm_pkg::DW_ACC-1:0] out_mux;
 
   for (genvar j = 0; j < N; j++) begin : g_requant
     requant_unit #(.DW_ACC(gemm_pkg::DW_ACC)) u_rq (
+      .clk     (clk),
+      .rst_n   (rst_n),
+      .en      (core_en),
       .acc     (acc_out_data[j*gemm_pkg::DW_ACC +: gemm_pkg::DW_ACC]),
       .mult    (cfg_mult),
       .shift   (cfg_shift),
@@ -225,7 +248,7 @@ module gemm_top #(
   end
 
   assign out_mux = cfg_quant_en ? {{(N*gemm_pkg::DW_ACC - N*8){1'b0}}, q_lane}
-                                : acc_out_data;
+                                : rq_raw;
 
   // tlast marks the final beat of the whole GEMM. Counted as rows leave the
   // accumulator rather than read from the FSM's current tile, so it stays
