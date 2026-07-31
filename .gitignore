@@ -11,3 +11,7 @@ sim_build/
 sim/build/
 results.xml
 runs/
+
+# Phase 4 sweep outputs: bulky logs/netlists stay out; the final sweep.csv
+# and per-run report files are force-added with the PPA writeup.
+flow/results/
