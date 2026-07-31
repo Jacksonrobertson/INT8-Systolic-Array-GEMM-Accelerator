@@ -47,10 +47,12 @@ source $::env(SITE_TRACKS)
 place_pins -hor_layers met3 -ver_layers met2
 
 # ---- placement -------------------------------------------------------------
+# No placement padding: post-CTS hold repair inserts delay buffers, and
+# padded rows at this density leave detailed placement nowhere to legalize
+# them (DPL-0036).
 global_placement -density [expr {($util + 5) / 100.0}]
 estimate_parasitics -placement
 repair_design
-set_placement_padding -global -left 1 -right 1
 detailed_placement
 
 # ---- clock tree ------------------------------------------------------------
