@@ -30,10 +30,12 @@ foreach p [all_inputs] {
 }
 set_input_delay  [expr {0.3 * $period}] -clock clk $nonclk
 set_output_delay [expr {0.3 * $period}] -clock clk [all_outputs]
-# Configuration is quasi-static (sampled at start, stable during a run):
-# loose 10% budget, mirroring flow/openlane/constraints.sdc, so cfg fanout
-# does not masquerade as the critical path.
-set_input_delay [expr {0.1 * $period}] -clock clk [get_ports {cfg_*}]
+# Configuration is quasi-static: dimensions are sampled at start and the
+# quantization constants must be stable for the whole run (SPEC 6.2). Even at
+# a 10% budget the cfg_shift -> 64-bit shifter -> clamp cone masquerades as
+# the design's critical path, so these are false-pathed outright -- the
+# interface contract, not the clock, bounds when they may change.
+set_false_path -from [get_ports {cfg_*}]
 set_driving_cell -lib_cell sky130_fd_sc_hd__buf_2 $nonclk
 set_load 0.05 [all_outputs]
 # Async reset: assumed externally synchronized; recovery is not the study's

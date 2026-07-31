@@ -11,9 +11,9 @@ import sys
 from pathlib import Path
 
 
-def grep1(text, pattern, default=""):
-    m = re.search(pattern, text)
-    return m.group(1) if m else default
+def grep1(text, pattern, default="", last=False):
+    ms = re.findall(pattern, text)
+    return (ms[-1] if last else ms[0]) if ms else default
 
 
 def main():
@@ -24,7 +24,8 @@ def main():
     # Only the report tail: earlier stages print their own slack lines.
     rpt = log[log.rfind("==REPORT timing=="):]
 
-    cells = grep1(synth, r"Number of cells:\s+(\d+)")
+    # Hierarchical stat prints one count per module; the design total is last.
+    cells = grep1(synth, r"Number of cells:\s+(\d+)", last=True)
     area = grep1(rpt, r"Design area (\d+) u\^2")
     util = grep1(rpt, r"(\d+)% utilization")
     wns = grep1(rpt.split("==REPORT wns==")[-1], r"worst slack (-?[\d.]+)")
