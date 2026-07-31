@@ -5,16 +5,16 @@ INT8 inference: `N×N` array of INT8 MACs with INT32 accumulators, AXI-Stream
 I/O, double-buffered weight memory, and a small control FSM. Verified at 4×4,
 synthesized at 8×8 (OpenLane/Sky130).
 
-**Status: Phase 3 complete** — cocotb constrained-random verification with
-enforced functional-coverage closure, on top of the Phase 2 SVA set and
-vector regression. Bench qualified by mutation testing.
+**Status: Phase 4 complete** — synthesized and placed-and-routed (study
+flow) on Sky130: 65 MHz / 8.3 GOPS / 6.0 GOPS/mm² at 8×8 after pipelining
+the P&R-measured critical path, with a before/after sweep to show for it.
 
 | Phase | Deliverable | Status |
 |---|---|---|
 | 1 | [Microarchitecture spec](docs/SPEC.md) + Python golden model | ✅ done |
 | 2 | Parameterized SystemVerilog RTL (PE → array → buffers/FSM → AXI-Stream) | ✅ done |
 | 3 | cocotb constrained-random verification + SVA + functional coverage | ✅ done |
-| 4 | OpenLane/Sky130 synthesis + P&R, PPA sweep and writeup | 🔨 [plan + flow prep](docs/PHASE4_PLAN.md) |
+| 4 | Sky130 synthesis + P&R study, [PPA sweep and writeup](docs/PHASE4_PPA.md) | ✅ done |
 | 5 | Packaging, reproducible builds, (optional) FPGA demo | ⬜ |
 
 ## Architecture at a glance
@@ -38,6 +38,8 @@ Phase 2 implementation report, including a correction to the spec's zero-bubble
 bound: **[docs/PHASE2_RTL.md](docs/PHASE2_RTL.md)**.
 Phase 3 verification report, including the coverage model and mutation
 checks: **[docs/PHASE3_VERIFICATION.md](docs/PHASE3_VERIFICATION.md)**.
+Phase 4 implementation report — fmax sweep, area breakdown, and the
+critical-path pipeline change: **[docs/PHASE4_PPA.md](docs/PHASE4_PPA.md)**.
 Looking at a single GEMM in GTKWave: **[docs/WAVEFORMS.md](docs/WAVEFORMS.md)**.
 
 ## Golden model
@@ -112,6 +114,11 @@ this design's known failure modes (see
 ### Performance
 
 Overhead beyond the ideal one-row-per-cycle stream is **constant in the number
-of tiles** when `M ≥ 2n` — 27 cycles at 4×4, 47 at 8×8 — i.e. tile handover is
-free. `M < 2n` pays a bounded per-handover bubble; see the correction note in
+of tiles** when `M ≥ 2n` — 28 cycles at 4×4, 48 at 8×8 (one cycle of which is
+the Phase 4 requant pipeline stage) — i.e. tile handover is free. `M < 2n`
+pays a bounded per-handover bubble; see the correction note in
 [SPEC §4.2](docs/SPEC.md#42-skewed-wavefront).
+
+On silicon (Sky130 study flow, N=8, M_MAX=32): **65 MHz, 8.3 GOPS,
+1.4–1.9 mm², 6.0 GOPS/mm²** — a 9% fmax gain from pipelining the requant
+critical path, measured before/after in [docs/PHASE4_PPA.md](docs/PHASE4_PPA.md).

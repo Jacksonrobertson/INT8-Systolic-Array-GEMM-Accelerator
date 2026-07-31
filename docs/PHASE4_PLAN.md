@@ -6,8 +6,11 @@ fmax, area breakdown (MACs vs buffers), GOPS/mm², where the critical path
 lives, and **one RTL change made because of what implementation showed** —
 the "RTL designer who understands physical design" proof.
 
-**Status of this document:** prep. Everything in §1 was *measured* on this
-repo (yosys 0.33, Verilator 5.020); §2–§6 are the plan.
+**Status of this document:** superseded — the phase is executed and the
+results are in **[PHASE4_PPA.md](PHASE4_PPA.md)** (via a conda/OpenROAD
+study flow in `flow/openroad/` rather than OpenLane; the OpenLane configs in
+`flow/openlane/` remain as the starting point for a signoff pass). Kept for
+the audit findings in §1 and the decision record in §2–§6.
 
 ---
 
