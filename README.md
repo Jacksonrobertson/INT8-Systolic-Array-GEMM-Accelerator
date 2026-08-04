@@ -33,6 +33,9 @@ vector regression. Bench qualified by mutation testing.
   (specified in [SPEC §7](docs/SPEC.md#7-output-stage-stretch-relu--requantization),
   already implemented in the golden model).
 
+New to the codebase? **[docs/CODE_MAP.md](docs/CODE_MAP.md)** walks through
+every file, how they relate, and how the accelerator works.
+
 Full details: **[docs/SPEC.md](docs/SPEC.md)**.
 Phase 2 implementation report, including a correction to the spec's zero-bubble
 bound: **[docs/PHASE2_RTL.md](docs/PHASE2_RTL.md)**.
