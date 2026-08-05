@@ -3,7 +3,8 @@
 The two state machines, every control and status signal and the module it
 connects to, and how data gets in and out over AXI-Stream.
 
-Companion to [CODE_MAP.md](CODE_MAP.md) (what every file is) and
+Companion to [CODE_MAP.md](CODE_MAP.md) (what every file is),
+[DATAFLOW.md](DATAFLOW.md) (stream layout and the weight transpose) and
 [SPEC.md](SPEC.md) (the microarchitecture specification). Everything here is
 read out of `rtl/gemm_ctrl.sv` and `rtl/gemm_top.sv`.
 
@@ -174,6 +175,10 @@ Three channels, `tvalid`/`tready`/`tdata`/`tlast` only — no `tkeep`, `tstrb`,
 
 Beat ordering is fixed by `model/generate_vectors.py` and is a hard contract
 across the RTL, the `.memh` vectors and the cocotb bench.
+
+For data *layout* rather than timing — what each byte position of `tdata` means,
+why weights are buffered and activations are not, and where the weight transpose
+happens — see [DATAFLOW.md](DATAFLOW.md).
 
 ### 3.1 `s_axis_w` — weights, `N*8` bits (64 at N=8)
 

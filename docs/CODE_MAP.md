@@ -3,11 +3,13 @@
 What every file in this repository is, how the pieces fit together, and how the
 accelerator actually works. Start here if you are new to the codebase.
 
-The other docs go deeper on individual phases: [SPEC.md](SPEC.md) is the
-microarchitecture specification, [PHASE2_RTL.md](PHASE2_RTL.md) the RTL
-implementation report, [PHASE3_VERIFICATION.md](PHASE3_VERIFICATION.md) the
-verification report, [PHASE4_PLAN.md](PHASE4_PLAN.md) the physical-design plan,
-and [WAVEFORMS.md](WAVEFORMS.md) how to look at a single GEMM in GTKWave.
+The other docs go deeper: [SPEC.md](SPEC.md) is the microarchitecture
+specification, [CONTROL.md](CONTROL.md) walks the state machines and every
+control/status signal, [DATAFLOW.md](DATAFLOW.md) the AXI-Stream layout and the
+weight transpose, [PHASE2_RTL.md](PHASE2_RTL.md) the RTL implementation report,
+[PHASE3_VERIFICATION.md](PHASE3_VERIFICATION.md) the verification report,
+[PHASE4_PLAN.md](PHASE4_PLAN.md) the physical-design plan, and
+[WAVEFORMS.md](WAVEFORMS.md) how to look at a single GEMM in GTKWave.
 
 ---
 
